@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Wave Spectrum</title>
+  <meta name="viewport" content="width=device-width, user-scalable=yes, initial-scale=1, maximum-scale=1">
+
+  <!-- UIkit CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/uikit/3.0.3/css/uikit.min.css" />
+
+  <!-- UIkit JS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/uikit/3.0.3/js/uikit.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/uikit/3.0.3/js/uikit-icons.min.js"></script>
+
+</head>
+<style>
+  @import url('https://rsms.me/inter/inter.css');
+  html { font-family: 'Inter', sans-serif !important;}
+  @supports (font-variation-settings: normal) {
+    html { font-family: 'Inter var', sans-serif; }
+  }
+
+  body {
+    margin: 0;
+    padding: 10em 8em 0 10em;
+  }
+
+  h1 {
+    color: #F7D187;
+    font-weight: 100;
+  }
+
+  label {
+    display: block;
+  }
+
+  #audioSource {
+    max-width: 16em;
+    background: none;
+    display: block;
+  }
+
+  #canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: -10;
+  }
+
+  /*div.select {*/
+    /*display: inline-block;*/
+    /*margin: 0 0 1em 0;*/
+  /*}*/
+  /*p.small {*/
+    /*font-size: 0.7em;*/
+  /*}*/
+  /*label {*/
+    /*width: 12em;*/
+    /*display: inline-block;*/
+  /*}*/
+</style>
+
+<body>
+
+<h1 class="uk-heading-hero">Aurora</h1>
+
+  <p class="uk-text-muted">A visualization of frequency spectrum created with microphone input, powered by
+    <a href="https://webrtc.org/">WebRTC</a> and
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API">Web Audio API</a>.</p>
+  <p style="font-style: italic;">Note: due to compatibility issues of Web Audio API, please us
+    <a href="https://www.mozilla.org/en-US/firefox/new/">Firfox</a> to achieve the best results.</p>
+
+  <div class="uk-text-right uk-align-right">
+    <label for="audioSource" class="uk-margin-small-bottom">Audio input source: </label>
+    <select id="audioSource" class="uk-select"></select>
+  </div>
+
+  <div>
+    <label for="voice">Voice setting</label>
+    <select id="voice" name="voice">
+      <option value="biquad">Bass Boost</option>
+      <option value="off" selected>Off</option>
+    </select>
+  </div>
+  <div>
+    <label for="visual">Visualizer setting</label>
+    <select id="visual" name="visual">
+      <option value="sinewave">Sinewave</option>
+      <option value="frequencybars" selected>Frequency bars</option>
+      <option value="off">Off</option>
+    </select>
+  </div>
+
+  <p class="small"><b>Note:</b> If you hear a reverb sound your microphone is picking up the output of your speakers/headset, lower the volume and/or move the microphone further away from your speakers/headset.</p>
+
+  <a href="https://github.com/webrtc/samples/tree/gh-pages/src/content/devices/input-output"
+     title="View source for this page on GitHub" id="viewSource">View source on GitHub</a>
+
+<canvas id="canvas"></canvas>
+
+<script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+<script>
+  'use strict';
+
+  // Recording related
+  const audioInputSelect = document.querySelector('select#audioSource');
+  const selectors = [audioInputSelect];
+  const voiceSelect = document.querySelector("#voice");
+  const visualSelect = document.querySelector("#visual");
+
+  // Hacks to deal with different function names in different browsers
+  window.requestAnimFrame = (function(){
+    return window.requestAnimationFrame || window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame ||
+      function(callback, element){
+        window.setTimeout(callback, 1000 / 60);
+      };
+  })();
+  window.AudioContext = (function(){
+    return window.webkitAudioContext || window.AudioContext || window.mozAudioContext;
+  })();
+
+  // Global Variables for the Graphics
+  const canvas = document.querySelector('#canvas');
+  const canvasCtx = canvas.getContext('2d');
+  let canvasWidth = window.innerWidth;
+  let canvasHeight = window.innerHeight;
+  canvas.width = canvasWidth;
+  canvas.height = canvasHeight;
+
+  // Audio analyse related
+  let audioContext;
+  let sourceNode;
+
+  // Set up AudioContext
+  try {
+    audioContext = new AudioContext();
+  } catch(e) {
+    alert('Web Audio API is not supported in this browser');
+  }
+
+  // Sound effects
+  let distortion = audioContext.createWaveShaper();
+  let gainNode = audioContext.createGain();
+  let biquadFilter = audioContext.createBiquadFilter();
+
+  // Visualization
+  let drawVisual;
+
+  //set up the different audio nodes
+  let analyserNode = audioContext.createAnalyser();
+  analyserNode.minDecibels = -90;
+  analyserNode.maxDecibels = -10;
+  analyserNode.smoothingTimeConstant = 0.85;
+
+  function gotDevices(deviceInfos) {
+    // Handles being called several times to update labels. Preserve values.
+    const values = selectors.map(select => select.value);
+    selectors.forEach(select => {
+      while (select.firstChild) {
+        select.removeChild(select.firstChild);
+      }
+    });
+    for (let i = 0; i !== deviceInfos.length; ++i) {
+      const deviceInfo = deviceInfos[i];
+      const option = document.createElement('option');
+      option.value = deviceInfo.deviceId;
+      if (deviceInfo.kind === 'audioinput') {
+        option.text = deviceInfo.label || `microphone ${audioInputSelect.length + 1}`;
+        audioInputSelect.appendChild(option);
+      } else {
+        console.log('Some other kind of source/device: ', deviceInfo);
+      }
+    }
+    selectors.forEach((select, selectorIndex) => {
+      if (Array.prototype.slice.call(select.childNodes).some(n => n.value === values[selectorIndex])) {
+        select.value = values[selectorIndex];
+      }
+    });
+  }
+
+  navigator.mediaDevices.enumerateDevices().then(gotDevices).catch(handleError);
+
+  function gotStream(stream) {
+    window.stream = stream; // make stream available to console
+    // videoElement.srcObject = stream;
+
+    // Set up audio analyser
+    sourceNode = audioContext.createMediaStreamSource(stream);
+    sourceNode.connect(biquadFilter);
+    biquadFilter.connect(gainNode);
+    gainNode.connect(analyserNode);
+    // analyserNode.connect(audioContext.destination);
+
+    visualize();
+    voiceChange();
+
+    // Refresh button list in case labels have become available
+    return navigator.mediaDevices.enumerateDevices();
+  }
+
+  function handleError(error) {
+    console.log('navigator.MediaDevices.getUserMedia error: ', error.message, error.name);
+  }
+
+  function start() {
+    if (window.stream) {
+      window.stream.getTracks().forEach(track => {
+        track.stop();
+      });
+    }
+    const audioSource = audioInputSelect.value;
+    const constraints = {
+      audio: {deviceId: audioSource ? {exact: audioSource} : undefined},
+      video: false
+    };
+    navigator.mediaDevices.getUserMedia(constraints).then(gotStream).then(gotDevices).catch(handleError);
+  }
+
+  // Sound effects
+  function voiceChange() {
+
+    biquadFilter.gain.setTargetAtTime(0, audioContext.currentTime, 0);
+
+    const voiceSetting = voiceSelect.value;
+    console.log(voiceSetting);
+
+    biquadFilter.disconnect(0);
+    biquadFilter.connect(gainNode);
+    if (voiceSetting === "biquad") {
+      biquadFilter.type = "lowshelf";
+      biquadFilter.frequency.setTargetAtTime(1000, audioContext.currentTime, 0);
+      biquadFilter.gain.setTargetAtTime(25, audioContext.currentTime, 0);
+    } else if (voiceSetting === "off") {
+      console.log("Voice settings turned off");
+    }
+  }
+
+  // Visualization
+  function visualize() {
+
+    const visualSetting = visualSelect.value;
+    console.log(visualSetting);
+
+    if (visualSetting === "sinewave") {
+      analyserNode.fftSize = 2048;
+      const bufferLength = analyserNode.fftSize;
+      console.log(bufferLength);
+      const dataArray = new Uint8Array(bufferLength);
+
+      canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+      const draw = function () {
+
+        drawVisual = requestAnimFrame(draw);
+
+        analyserNode.getByteTimeDomainData(dataArray);
+
+        canvasCtx.fillStyle = 'rgb(200, 200, 200)';
+        canvasCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+        canvasCtx.lineWidth = 2;
+        canvasCtx.strokeStyle = 'rgb(0, 0, 0)';
+
+        canvasCtx.beginPath();
+
+        const sliceWidth = canvasWidth * 1.0 / bufferLength;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+
+          const v = dataArray[i] / 128.0;
+          let y = v * canvasHeight / 2;
+
+          if (i === 0) {
+            canvasCtx.moveTo(x, y);
+          } else {
+            canvasCtx.lineTo(x, y);
+          }
+
+          x += sliceWidth;
+        }
+
+        canvasCtx.lineTo(canvas.width, canvas.height / 2);
+        canvasCtx.stroke();
+      };
+
+      draw();
+
+    } else if (visualSetting === "frequencybars") {
+      analyserNode.fftSize = 8192;
+      const bufferLengthAlt = analyserNode.frequencyBinCount;
+      console.log(bufferLengthAlt);
+      const dataArrayAlt = new Uint8Array(bufferLengthAlt);
+
+      canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+      const scaleHue = function (value) {
+        const startHue = 240;
+        const endHue = 60;
+        const range = endHue - startHue;
+        const domainMax = 200;
+
+        return startHue + value / domainMax * range;
+      };
+      const scaleAlpha = function (value) {
+        const startAlpha = 0;
+        const endAlpha = 0.8;
+        const range = endAlpha - startAlpha;
+        const domainMax = 200;
+
+        if (value >= domainMax) {
+          return endAlpha;
+        } else {
+          return startAlpha + value / domainMax * range;
+        }
+      };
+
+      const drawAlt = function () {
+        drawVisual = requestAnimFrame(drawAlt);
+
+        const baseLine = 100;
+        const lineHight = 600;
+        const gutter = 0.6;
+
+        let lineGradient = canvasCtx.createLinearGradient(0, baseLine - lineHight/2, 0, baseLine + lineHight/2);
+        lineGradient.addColorStop(0, 'hsla(280,100%,0%,1)');
+        lineGradient.addColorStop(.5, 'hsla(280,100%,0%,0)');
+        lineGradient.addColorStop(1, 'hsla(280,100%,0%,1)');
+
+        analyserNode.getByteFrequencyData(dataArrayAlt);
+
+        canvasCtx.fillStyle = 'rgb(0, 0, 0)';
+        canvasCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+        const barWidth = (canvasWidth / bufferLengthAlt) * 10;
+        let barHeight;
+        let x = 0;
+
+        for (let i = 0; i < bufferLengthAlt; i++) {
+          barHeight = dataArrayAlt[i] * 2;
+
+          canvasCtx.fillStyle = 'hsla(280, 100%, 50%, ' + scaleAlpha(barHeight) + ')';
+          canvasCtx.fillRect(x - gutter, baseLine - lineHight/2, barWidth + gutter*2, lineHight);
+
+          canvasCtx.fillStyle = 'hsla(' + scaleHue(barHeight) + ',100%, 50%, 0.8)';
+          canvasCtx.fillRect(x, canvasHeight - barHeight, barWidth, barHeight);
+
+          x += barWidth + 1;
+        }
+
+        canvasCtx.fillStyle = lineGradient;
+        canvasCtx.fillRect(0, baseLine - lineHight/2, canvasWidth, lineHight);
+
+      };
+
+      // javascriptNode.onaudioprocess = drawAlt();
+      drawAlt();
+
+    } else if (visualSetting === "off") {
+      canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+      canvasCtx.fillStyle = "red";
+      canvasCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+    }
+
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    audioInputSelect.onchange = start;
+
+    visualSelect.onchange = function() {
+      window.cancelAnimationFrame(drawVisual);
+      visualize();
+    };
+
+    voiceSelect.onchange = function() {
+      voiceChange();
+    };
+
+
+    start();
+  });
+</script>
+
+</body>
+</html>
