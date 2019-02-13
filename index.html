@@ -75,23 +75,19 @@
     <select id="audioSource" class="uk-select"></select>
   </div>
 
-  <div>
-    <label for="voice">Voice setting</label>
-    <select id="voice" name="voice">
-      <option value="biquad">Bass Boost</option>
-      <option value="off" selected>Off</option>
-    </select>
+  <div class="uk-margin-medium-top">
+    <p class="uk-margin-remove-bottom">Code References</p>
+    <p class="uk-text-meta uk-margin-remove-top" style="color: #666666;">
+      <a href="https://github.com/webrtc/samples/blob/gh-pages/src/content/devices/input-output/js/main.js">
+      WebRTC Example - input-output</a><br>
+      <a href="https://github.com/mdn/voice-change-o-matic/blob/gh-pages/scripts/app.js#L128-L205">
+        Web Audio API Example - voice-change-o-matic
+      </a><br>
+      <a href="https://github.com/mdn/webaudio-examples/blob/master/audio-analyser/index.html">
+        Web Audio API Example - audio-analyser
+      </a>
+    </p>
   </div>
-  <div>
-    <label for="visual">Visualizer setting</label>
-    <select id="visual" name="visual">
-      <option value="sinewave">Sinewave</option>
-      <option value="frequencybars" selected>Frequency bars</option>
-      <option value="off">Off</option>
-    </select>
-  </div>
-
-  <p class="small"><b>Note:</b> If you hear a reverb sound your microphone is picking up the output of your speakers/headset, lower the volume and/or move the microphone further away from your speakers/headset.</p>
 
   <a href="https://github.com/webrtc/samples/tree/gh-pages/src/content/devices/input-output"
      title="View source for this page on GitHub" id="viewSource">View source on GitHub</a>
@@ -105,8 +101,6 @@
   // Recording related
   const audioInputSelect = document.querySelector('select#audioSource');
   const selectors = [audioInputSelect];
-  const voiceSelect = document.querySelector("#voice");
-  const visualSelect = document.querySelector("#visual");
 
   // Hacks to deal with different function names in different browsers
   window.requestAnimFrame = (function(){
@@ -138,19 +132,47 @@
     alert('Web Audio API is not supported in this browser');
   }
 
+  //set up the different audio nodes
+  let analyserNode1;
+  let analyserNode2;
+
   // Sound effects
-  let distortion = audioContext.createWaveShaper();
-  let gainNode = audioContext.createGain();
-  let biquadFilter = audioContext.createBiquadFilter();
+  let distortion;
+  let gainNode;
+  let biquadFilter;
 
   // Visualization
   let drawVisual;
 
-  //set up the different audio nodes
-  let analyserNode = audioContext.createAnalyser();
-  analyserNode.minDecibels = -90;
-  analyserNode.maxDecibels = -10;
-  analyserNode.smoothingTimeConstant = 0.85;
+  function setupAudioNodes() {
+    // Set up audio analyser
+    analyserNode1 = audioContext.createAnalyser();
+    analyserNode1.minDecibels = -90;
+    analyserNode1.maxDecibels = -10;
+    analyserNode1.smoothingTimeConstant = 0.85;
+
+    analyserNode2 = audioContext.createAnalyser();
+    analyserNode2.minDecibels = -90;
+    analyserNode2.maxDecibels = -10;
+    analyserNode2.smoothingTimeConstant = 0.85;
+
+    // Sound effects
+    distortion = audioContext.createWaveShaper();
+    gainNode = audioContext.createGain();
+    biquadFilter = audioContext.createBiquadFilter();
+
+    // Get stream
+    sourceNode = audioContext.createMediaStreamSource(stream);
+
+    // Connect nodes
+    // sourceNode.connect(distortion);
+    sourceNode.connect(biquadFilter);
+    biquadFilter.connect(gainNode);
+    gainNode.connect(analyserNode1);
+    sourceNode.connect(analyserNode2);
+    // analyserNode.connect(audioContext.destination);
+
+  }
 
   function gotDevices(deviceInfos) {
     // Handles being called several times to update labels. Preserve values.
@@ -182,14 +204,8 @@
 
   function gotStream(stream) {
     window.stream = stream; // make stream available to console
-    // videoElement.srcObject = stream;
 
-    // Set up audio analyser
-    sourceNode = audioContext.createMediaStreamSource(stream);
-    sourceNode.connect(biquadFilter);
-    biquadFilter.connect(gainNode);
-    gainNode.connect(analyserNode);
-    // analyserNode.connect(audioContext.destination);
+    setupAudioNodes();
 
     visualize();
     voiceChange();
@@ -217,165 +233,281 @@
   }
 
   // Sound effects
+
+  // distortion curve for the waveshaper, thanks to Kevin Ennis
+  // http://stackoverflow.com/questions/22312841/waveshaper-node-in-webaudio-how-to-emulate-distortion
+
+  function makeDistortionCurve(amount) {
+    let k = typeof amount === 'number' ? amount : 50,
+      n_samples = 44100,
+      curve = new Float32Array(n_samples),
+      deg = Math.PI / 180,
+      i = 0,
+      x;
+    for ( ; i < n_samples; ++i ) {
+      x = i * 2 / n_samples - 1;
+      curve[i] = ( 3 + k ) * x * 20 * deg / ( Math.PI + k * Math.abs(x) );
+    }
+    return curve;
+  }
+
   function voiceChange() {
 
     biquadFilter.gain.setTargetAtTime(0, audioContext.currentTime, 0);
 
-    const voiceSetting = voiceSelect.value;
-    console.log(voiceSetting);
+    biquadFilter.type = "lowshelf";
+    biquadFilter.frequency.setTargetAtTime(1000, audioContext.currentTime, 0);
+    biquadFilter.gain.setTargetAtTime(25, audioContext.currentTime, 0);
 
-    biquadFilter.disconnect(0);
-    biquadFilter.connect(gainNode);
-    if (voiceSetting === "biquad") {
-      biquadFilter.type = "lowshelf";
-      biquadFilter.frequency.setTargetAtTime(1000, audioContext.currentTime, 0);
-      biquadFilter.gain.setTargetAtTime(25, audioContext.currentTime, 0);
-    } else if (voiceSetting === "off") {
-      console.log("Voice settings turned off");
-    }
+  // const voiceSetting = voiceSelect.value;
+  // console.log(voiceSetting);
+
+    // biquadFilter.disconnect(0);
+    // biquadFilter.connect(gainNode);
+    // if (voiceSetting === "biquad") {
+    //   biquadFilter.type = "lowshelf";
+    //   biquadFilter.frequency.setTargetAtTime(1000, audioContext.currentTime, 0);
+    //   biquadFilter.gain.setTargetAtTime(25, audioContext.currentTime, 0);
+    // } else if (voiceSetting === "off") {
+    //   console.log("Voice settings turned off");
+    // }
   }
 
   // Visualization
   function visualize() {
 
-    const visualSetting = visualSelect.value;
-    console.log(visualSetting);
+    analyserNode1.fftSize = 8192;
+    analyserNode2.fftSize = 16384;
+    const bufferLength1 = analyserNode1.frequencyBinCount;
+    const bufferLength2 = analyserNode2.frequencyBinCount;
+    console.log(bufferLength1);
 
-    if (visualSetting === "sinewave") {
-      analyserNode.fftSize = 2048;
-      const bufferLength = analyserNode.fftSize;
-      console.log(bufferLength);
-      const dataArray = new Uint8Array(bufferLength);
+    const dataArray1 = new Uint8Array(bufferLength1);
+    const dataArray2 = new Uint8Array(bufferLength2);
 
-      canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+    // Clear last frame
+    canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-      const draw = function () {
+    // Scaling for visualization
+    const scaleHue = function (value) {
+      const startHue = 240;
+      const endHue = 60;
+      const range = endHue - startHue;
+      const domainMax = 200;
+      return startHue + value / domainMax * range;
+    };
 
-        drawVisual = requestAnimFrame(draw);
+    const scaleAlpha = function (value) {
+      const startAlpha = 0;
+      const endAlpha = 0.8;
+      const range = endAlpha - startAlpha;
+      const domainMax = 200;
+      if (value >= domainMax) {
+        return endAlpha;
+      } else {
+        return startAlpha + value / domainMax * range;
+      }
+    };
 
-        analyserNode.getByteTimeDomainData(dataArray);
+    // Draw visualization
+    const drawViz = function () {
 
-        canvasCtx.fillStyle = 'rgb(200, 200, 200)';
-        canvasCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+      drawVisual = requestAnimFrame(drawViz);
 
-        canvasCtx.lineWidth = 2;
-        canvasCtx.strokeStyle = 'rgb(0, 0, 0)';
+      const baseLine = 100;
+      const lineHight = 600;
+      const gutter = 0.6;
 
-        canvasCtx.beginPath();
+      // Gradient
+      let lineGradient = canvasCtx.createLinearGradient(0, baseLine - lineHight/2, 0, baseLine + lineHight/2);
+      lineGradient.addColorStop(0, 'hsla(280,100%,0%,1)');
+      lineGradient.addColorStop(.5, 'hsla(280,100%,0%,0)');
+      lineGradient.addColorStop(1, 'hsla(280,100%,0%,1)');
 
-        const sliceWidth = canvasWidth * 1.0 / bufferLength;
-        let x = 0;
+      analyserNode1.getByteFrequencyData(dataArray1);
+      analyserNode2.getByteFrequencyData(dataArray2);
 
-        for (let i = 0; i < bufferLength; i++) {
-
-          const v = dataArray[i] / 128.0;
-          let y = v * canvasHeight / 2;
-
-          if (i === 0) {
-            canvasCtx.moveTo(x, y);
-          } else {
-            canvasCtx.lineTo(x, y);
-          }
-
-          x += sliceWidth;
-        }
-
-        canvasCtx.lineTo(canvas.width, canvas.height / 2);
-        canvasCtx.stroke();
-      };
-
-      draw();
-
-    } else if (visualSetting === "frequencybars") {
-      analyserNode.fftSize = 8192;
-      const bufferLengthAlt = analyserNode.frequencyBinCount;
-      console.log(bufferLengthAlt);
-      const dataArrayAlt = new Uint8Array(bufferLengthAlt);
-
-      canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
-
-      const scaleHue = function (value) {
-        const startHue = 240;
-        const endHue = 60;
-        const range = endHue - startHue;
-        const domainMax = 200;
-
-        return startHue + value / domainMax * range;
-      };
-      const scaleAlpha = function (value) {
-        const startAlpha = 0;
-        const endAlpha = 0.8;
-        const range = endAlpha - startAlpha;
-        const domainMax = 200;
-
-        if (value >= domainMax) {
-          return endAlpha;
-        } else {
-          return startAlpha + value / domainMax * range;
-        }
-      };
-
-      const drawAlt = function () {
-        drawVisual = requestAnimFrame(drawAlt);
-
-        const baseLine = 100;
-        const lineHight = 600;
-        const gutter = 0.6;
-
-        let lineGradient = canvasCtx.createLinearGradient(0, baseLine - lineHight/2, 0, baseLine + lineHight/2);
-        lineGradient.addColorStop(0, 'hsla(280,100%,0%,1)');
-        lineGradient.addColorStop(.5, 'hsla(280,100%,0%,0)');
-        lineGradient.addColorStop(1, 'hsla(280,100%,0%,1)');
-
-        analyserNode.getByteFrequencyData(dataArrayAlt);
-
-        canvasCtx.fillStyle = 'rgb(0, 0, 0)';
-        canvasCtx.fillRect(0, 0, canvasWidth, canvasHeight);
-
-        const barWidth = (canvasWidth / bufferLengthAlt) * 10;
-        let barHeight;
-        let x = 0;
-
-        for (let i = 0; i < bufferLengthAlt; i++) {
-          barHeight = dataArrayAlt[i] * 2;
-
-          canvasCtx.fillStyle = 'hsla(280, 100%, 50%, ' + scaleAlpha(barHeight) + ')';
-          canvasCtx.fillRect(x - gutter, baseLine - lineHight/2, barWidth + gutter*2, lineHight);
-
-          canvasCtx.fillStyle = 'hsla(' + scaleHue(barHeight) + ',100%, 50%, 0.8)';
-          canvasCtx.fillRect(x, canvasHeight - barHeight, barWidth, barHeight);
-
-          x += barWidth + 1;
-        }
-
-        canvasCtx.fillStyle = lineGradient;
-        canvasCtx.fillRect(0, baseLine - lineHight/2, canvasWidth, lineHight);
-
-      };
-
-      // javascriptNode.onaudioprocess = drawAlt();
-      drawAlt();
-
-    } else if (visualSetting === "off") {
-      canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
-      canvasCtx.fillStyle = "red";
+      // Background
+      canvasCtx.fillStyle = 'rgb(0, 0, 0)';
       canvasCtx.fillRect(0, 0, canvasWidth, canvasHeight);
-    }
+
+      const barWidth1 = (canvasWidth / bufferLength1) * 10;
+      let barHeight1;
+      let x1 = 0;
+
+      const barWidth2 = (canvasWidth / bufferLength2) * 10;
+      let barHeight2;
+      let x2 = 0;
+
+      for (let i = 0; i < bufferLength1; i++) {
+        barHeight1 = dataArray1[i] * 2;
+
+        // Gradient 1
+        canvasCtx.fillStyle = 'hsla(280, 100%, 50%, ' + scaleAlpha(barHeight1) + ')';
+        canvasCtx.fillRect(x1 - gutter, baseLine - lineHight/2, barWidth1 + gutter*2, lineHight);
+
+        x1 += barWidth1 + 1;
+      }
+
+      for (let j = 0; j < bufferLength2; j++) {
+        barHeight2 = dataArray2[j] * 2;
+
+        // Gradient 2
+        canvasCtx.fillStyle = 'hsla(200, 100%, 50%, ' + scaleAlpha(barHeight2) + ')';
+        canvasCtx.fillRect(x2 - gutter, baseLine - lineHight/2, barWidth2 + gutter*2, lineHight);
+
+        // Frequency chart
+        canvasCtx.fillStyle = 'hsla(' + scaleHue(barHeight2) + ',100%, 50%, 0.8)';
+        canvasCtx.fillRect(x2, canvasHeight - barHeight2, barWidth2, barHeight2);
+
+        x2 += barWidth2 + 1;
+      }
+
+      // Background
+      canvasCtx.fillStyle = lineGradient;
+      canvasCtx.fillRect(0, baseLine - lineHight/2, canvasWidth, lineHight);
+    };
+
+    // Draw
+    drawViz();
+
+    // const visualSetting = visualSelect.value;
+    // console.log(visualSetting);
+
+    // if (visualSetting === "sinewave") {
+    //   analyserNode1.fftSize = 2048;
+    //   const bufferLength = analyserNode1.fftSize;
+    //   console.log(bufferLength);
+    //   const dataArray = new Uint8Array(bufferLength);
+    //
+    //   canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+    //
+    //   const draw = function () {
+    //
+    //     drawVisual = requestAnimFrame(draw);
+    //
+    //     analyserNode1.getByteTimeDomainData(dataArray);
+    //
+    //     canvasCtx.fillStyle = 'rgb(200, 200, 200)';
+    //     canvasCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+    //
+    //     canvasCtx.lineWidth = 2;
+    //     canvasCtx.strokeStyle = 'rgb(0, 0, 0)';
+    //
+    //     canvasCtx.beginPath();
+    //
+    //     const sliceWidth = canvasWidth * 1.0 / bufferLength;
+    //     let x = 0;
+    //
+    //     for (let i = 0; i < bufferLength; i++) {
+    //
+    //       const v = dataArray[i] / 128.0;
+    //       let y = v * canvasHeight / 2;
+    //
+    //       if (i === 0) {
+    //         canvasCtx.moveTo(x, y);
+    //       } else {
+    //         canvasCtx.lineTo(x, y);
+    //       }
+    //
+    //       x += sliceWidth;
+    //     }
+    //
+    //     canvasCtx.lineTo(canvas.width, canvas.height / 2);
+    //     canvasCtx.stroke();
+    //   };
+    //
+    //   draw();
+    //
+    // } else if (visualSetting === "frequencybars") {
+    //   analyserNode1.fftSize = 8192;
+    //   const bufferLengthAlt = analyserNode1.frequencyBinCount;
+    //   console.log(bufferLengthAlt);
+    //   const dataArrayAlt = new Uint8Array(bufferLengthAlt);
+    //
+    //   canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+    //
+    //   const scaleHue = function (value) {
+    //     const startHue = 240;
+    //     const endHue = 60;
+    //     const range = endHue - startHue;
+    //     const domainMax = 200;
+    //
+    //     return startHue + value / domainMax * range;
+    //   };
+    //   const scaleAlpha = function (value) {
+    //     const startAlpha = 0;
+    //     const endAlpha = 0.8;
+    //     const range = endAlpha - startAlpha;
+    //     const domainMax = 200;
+    //
+    //     if (value >= domainMax) {
+    //       return endAlpha;
+    //     } else {
+    //       return startAlpha + value / domainMax * range;
+    //     }
+    //   };
+    //
+    //   const drawAlt = function () {
+    //     drawVisual = requestAnimFrame(drawAlt);
+    //
+    //     const baseLine = 100;
+    //     const lineHight = 600;
+    //     const gutter = 0.6;
+    //
+    //     let lineGradient = canvasCtx.createLinearGradient(0, baseLine - lineHight/2, 0, baseLine + lineHight/2);
+    //     lineGradient.addColorStop(0, 'hsla(280,100%,0%,1)');
+    //     lineGradient.addColorStop(.5, 'hsla(280,100%,0%,0)');
+    //     lineGradient.addColorStop(1, 'hsla(280,100%,0%,1)');
+    //
+    //     analyserNode1.getByteFrequencyData(dataArrayAlt);
+    //
+    //     canvasCtx.fillStyle = 'rgb(0, 0, 0)';
+    //     canvasCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+    //
+    //     const barWidth = (canvasWidth / bufferLengthAlt) * 10;
+    //     let barHeight;
+    //     let x = 0;
+    //
+    //     for (let i = 0; i < bufferLengthAlt; i++) {
+    //       barHeight = dataArrayAlt[i] * 2;
+    //
+    //       canvasCtx.fillStyle = 'hsla(280, 100%, 50%, ' + scaleAlpha(barHeight) + ')';
+    //       canvasCtx.fillRect(x - gutter, baseLine - lineHight/2, barWidth + gutter*2, lineHight);
+    //
+    //       canvasCtx.fillStyle = 'hsla(' + scaleHue(barHeight) + ',100%, 50%, 0.8)';
+    //       canvasCtx.fillRect(x, canvasHeight - barHeight, barWidth, barHeight);
+    //
+    //       x += barWidth + 1;
+    //     }
+    //
+    //     canvasCtx.fillStyle = lineGradient;
+    //     canvasCtx.fillRect(0, baseLine - lineHight/2, canvasWidth, lineHight);
+    //
+    //   };
+    //
+    //   // javascriptNode.onaudioprocess = drawAlt();
+    //   drawAlt();
+    //
+    // } else if (visualSetting === "off") {
+    //   canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+    //   canvasCtx.fillStyle = "red";
+    //   canvasCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+    // }
 
   }
 
   document.addEventListener('DOMContentLoaded', () => {
     audioInputSelect.onchange = start;
 
-    visualSelect.onchange = function() {
-      window.cancelAnimationFrame(drawVisual);
-      visualize();
-    };
-
-    voiceSelect.onchange = function() {
-      voiceChange();
-    };
-
+    // visualSelect.onchange = function() {
+    //   window.cancelAnimationFrame(drawVisual);
+    //   visualize();
+    // };
+    //
+    // voiceSelect.onchange = function() {
+    //   voiceChange();
+    // };
 
     start();
   });
