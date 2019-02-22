@@ -12,6 +12,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/uikit/3.0.3/js/uikit.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/uikit/3.0.3/js/uikit-icons.min.js"></script>
 
+  <script src="wavesurfer.microphone.js"></script>
+
 </head>
 <style>
   @import url('https://rsms.me/inter/inter.css');
@@ -144,7 +146,7 @@
   // Visualization
   let drawVisual;
 
-  function setupAudioNodes() {
+  function setupAudioNodes(stream) {
     // Set up audio analyser
     analyserNode1 = audioContext.createAnalyser();
     analyserNode1.minDecibels = -90;
@@ -205,7 +207,7 @@
   function gotStream(stream) {
     window.stream = stream; // make stream available to console
 
-    setupAudioNodes();
+    setupAudioNodes(stream);
 
     visualize();
     voiceChange();
@@ -340,7 +342,7 @@
       let x2 = 0;
 
       for (let i = 0; i < bufferLength1; i++) {
-        barHeight1 = dataArray1[i];
+        barHeight1 = dataArray1[i] * 2;
 
         // Gradient 1
         canvasCtx.fillStyle = 'hsla(280, 100%, 50%, ' + scaleAlpha(barHeight1) + ')';
@@ -350,7 +352,7 @@
       }
 
       for (let j = 0; j < bufferLength2; j++) {
-        barHeight2 = dataArray2[j];
+        barHeight2 = dataArray2[j] * 2;
 
         // Gradient 2
         canvasCtx.fillStyle = 'hsla(200, 100%, 50%, ' + scaleAlpha(barHeight2) + ')';
